@@ -125,6 +125,9 @@ int main(int argc, char **argv)
   unsigned active_nb;
   double active_prop;
   unsigned tcount = 0;
+  unsigned out_data_period = 10;
+  unsigned out_conf_period = 1000;
+  unsigned simu_stop = 50000;
   mfloat diam2 = 4*conf.rad()*conf.rad();
 
   std::string dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
@@ -165,17 +168,17 @@ int main(int argc, char **argv)
     bxset.buildNeighborhoodContainers();
     active_prop = active_nb;
     active_prop /= conf.np();
-    if (tcount%100 == 0) {
+    if (tcount%out_data_period == 0) {
       out_data << tcount << " " << active_prop << std::endl;
       std::cout << tcount << " " << active_prop << std::endl;
     }
-    if (tcount%1000 == 0) {
+    if (tcount%out_conf_period == 0) {
       out_conf.seekp(0, out_conf.beg);
       out_conf << "time: " << tcount << std::endl;
       printConf(out_conf, conf.pos);
     }
     tcount++;
-  } while(active_nb);
+  } while(active_nb&&tcount<simu_stop);
 
   out_data << tcount << " " << active_prop << std::endl;
   std::cout << tcount << " " << active_prop << std::endl;
