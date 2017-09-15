@@ -1,0 +1,10 @@
+.ipynb_checkpoints/
+
+*.ipynb
+
+data/
+
+MF_TB
+
+*pdf
+
