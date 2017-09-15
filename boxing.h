@@ -133,6 +133,7 @@ private:
 	std::vector<Box> boxes;
 	std::vector<Box*> boxMap;
 	Periodizer pbc;
+	mfloat total_size;
 	Box* whichBox(const std::array<mfloat,2> &pos);
 	void assignNeighbors();
 public:
@@ -153,7 +154,8 @@ inline BoxSet::BoxSet(mfloat box_min_size,
 											mfloat system_size,
 											Periodizer PBC):
 _is_boxed(false),
-pbc(PBC)
+pbc(PBC),
+total_size(system_size)
 {
 	std::cout << "Setting up Cell List System ... ";
 	if (box_min_size > system_size) {
@@ -204,7 +206,7 @@ inline void BoxSet::assignNeighbors()
 
 inline Box* BoxSet::whichBox(const std::array<mfloat, 2> &pos)
 {
-	unsigned label = (unsigned)(pos[0]/box_size)+box_nb*(unsigned)(pos[1]/box_size);
+	unsigned label = (unsigned)(box_nb*(pos[0]/total_size))+box_nb*(unsigned)(box_nb*(pos[1]/total_size));
 	if (label >= boxes.size()) {
 		std::ostringstream error_str;
 		error_str  << " BoxSet: trying to box position out of boundaries \"" << pos[0] << ", " << pos[1]	<< "\""\
