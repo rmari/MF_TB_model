@@ -1,5 +1,7 @@
 #include <iostream>
 #include <fstream>
+#include <tuple>
+
 #include <getopt.h>
 
 #include "MersenneTwister.h"
@@ -52,9 +54,9 @@ public:
   _size(getSize(np, phi, rad)),
   half_size(_size/2) {};
   std::vector<std::array<mfloat, 2>> pos;
-  mfloat size() {return _size;};
-  mfloat phi() {return _phi;};
-  mfloat dist_square(unsigned i, unsigned j) {
+  mfloat size() const {return _size;};
+  mfloat phi() const {return _phi;};
+  mfloat dist_square(unsigned i, unsigned j) const {
     mfloat d2 = 0;
     for (auto d: {pos[j][0] - pos[i][0], pos[j][1] - pos[i][1]}) {
       while (d > half_size)
@@ -65,8 +67,8 @@ public:
     }
     return d2;
   }
-  unsigned np() {return pos.size();};
-  mfloat rad() {return _rad;};
+  unsigned np() const {return pos.size();};
+  mfloat rad() const {return _rad;};
 private:
   mfloat _rad;
   mfloat _phi;
@@ -74,44 +76,93 @@ private:
   mfloat half_size;
 };
 
-Configuration init_conf(int argc, char **argv) {
+std::tuple<unsigned, mfloat, mfloat>  parse_args(int argc, char **argv) {
   const struct option longopts[] = {
-		{"np",   required_argument, 0, 'n'},
-		{"phi",  required_argument, 0, 'p'},
-		{0, 0, 0, 0},
-	};
+    {"np",   required_argument, 0, 'n'},
+    {"phi",  required_argument, 0, 'p'},
+    {"range",  required_argument, 0, 'r'},
+    {0, 0, 0, 0},
+  };
 
-	int index;
-	int c;
+  int index;
+  int c;
   unsigned np = 0;
   mfloat phi = 1;
-	while ((c = getopt_long(argc, argv, "n:p:", longopts, &index)) != -1) {
-		switch (c) {
-			case 'n':
+  mfloat range = -1;
+  while ((c = getopt_long(argc, argv, "n:p:r:", longopts, &index)) != -1) {
+    switch (c) {
+      case 'n':
         np = atoi(optarg);
-				break;
-			case 'p':
+        break;
+      case 'p':
         phi = atof(optarg);
-				break;
-			case '?':
-				/* getopt already printed an error message. */
-				break;
-			default:
-				abort();
-		}
-	}
+        break;
+      case 'r':
+        range = atof(optarg);
+        break;
+      case '?':
+        /* getopt already printed an error message. */
+        break;
+      default:
+        abort();
+    }
+  }
+  return std::make_tuple(np, phi, range);
+}
+
+void findActive(const Configuration &conf, std::vector<bool> &to_be_moved, const BoxSet &bxset, mfloat diam2) {
+  to_be_moved.assign(conf.np(), false);
+  for (unsigned i=0; i<conf.np(); i++) {
+    auto neigh_out = bxset.neighborsOffBox(i);
+    for (auto j: neigh_out) {
+      if (conf.dist_square(i, j) < diam2) {
+        to_be_moved[i] = true;
+        to_be_moved[j] = true;
+      }
+    }
+    auto neigh_in = bxset.neighborsInBox(i);
+    for (auto j: neigh_in) {
+      if (conf.dist_square(i, j) < diam2) {
+        to_be_moved[i] = true;
+        to_be_moved[j] = true;
+      }
+    }
+  }
+}
+
+unsigned moveParticlesMF(Configuration &conf, const std::vector<bool> &to_be_moved, MTRand &r_gen) {
+  unsigned active_nb = 0;
+  for (unsigned i=0; i<conf.np(); i++) {
+    if (to_be_moved[i]) {
+      conf.pos[i][0] = conf.size()*r_gen.rand();
+      conf.pos[i][1] = conf.size()*r_gen.rand();
+      active_nb++;
+    }
+  }
+  return active_nb;
+}
 
 
-  mfloat rad = 1;
-  Configuration conf(np, phi, rad);
-
-  return conf;
+unsigned moveParticles(Configuration &conf, const std::vector<bool> &to_be_moved, MTRand &r_gen, mfloat range) {
+  unsigned active_nb = 0;
+  for (unsigned i=0; i<conf.np(); i++) {
+    if (to_be_moved[i]) {
+      conf.pos[i][0] += r_gen.randNorm(0., range);
+      conf.pos[i][1] += r_gen.randNorm(0., range);
+      active_nb++;
+    }
+  }
+  return active_nb;
 }
 
 int main(int argc, char **argv)
 {
 
-  auto conf = init_conf(argc, argv);
+  auto params = parse_args(argc, argv);
+  mfloat range = std::get<2>(params);
+  bool mean_field = range < 0;
+  mfloat rad = 1;
+  Configuration conf(std::get<0>(params), std::get<1>(params), rad);
   MTRand r_gen;
   conf.pos = randConf(conf.np(), conf.size(), r_gen);
 
@@ -130,40 +181,28 @@ int main(int argc, char **argv)
   unsigned simu_stop = 50000;
   mfloat diam2 = 4*conf.rad()*conf.rad();
 
-  std::string dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
+  std::string dfile_name, cfile_name;
+  if(mean_field) {
+    dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
+    cfile_name = "conf_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
+  } else {
+    dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+"_range"+std::to_string(range)+".dat";
+    cfile_name = "conf_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+"_range"+std::to_string(range)+".dat";
+  }
   checkFileExists(dfile_name);
   std::ofstream out_data (dfile_name.c_str());
-  std::string cfile_name = "conf_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
   checkFileExists(cfile_name);
   std::ofstream out_conf (cfile_name.c_str());
 
   do {
-    to_be_moved.assign(conf.np(), false);
-    for (unsigned i=0; i<conf.np(); i++) {
-      auto neigh_out = bxset.neighborsOffBox(i);
-      for (auto j: neigh_out) {
-        if (conf.dist_square(i, j) < diam2) {
-          to_be_moved[i] = true;
-          to_be_moved[j] = true;
-        }
-      }
-      auto neigh_in = bxset.neighborsInBox(i);
-      for (auto j: neigh_in) {
-        if (conf.dist_square(i, j) < diam2) {
-          to_be_moved[i] = true;
-          to_be_moved[j] = true;
-        }
-      }
+    findActive(conf, to_be_moved, bxset, diam2);
+    if (mean_field) {
+      active_nb = moveParticlesMF(conf, to_be_moved, r_gen);
+    } else {
+      active_nb = moveParticles(conf, to_be_moved, r_gen, range);
+      pbc.periodize(conf.pos);
     }
-    active_nb = 0;
-    for (unsigned i=0; i<conf.np(); i++) {
-      if (to_be_moved[i]) {
-        conf.pos[i][0] = conf.size()*r_gen.rand();
-        conf.pos[i][1] = conf.size()*r_gen.rand();
-        active_nb++;
-      }
-    }
-    pbc.periodize(conf.pos);
+
     bxset.box(conf.pos);
     bxset.buildNeighborhoodContainers();
     active_prop = active_nb;
