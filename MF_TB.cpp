@@ -125,7 +125,7 @@ void findActive(const Configuration &conf,
     }
     auto neigh_in = bxset.neighborsInBox(i);
     for (auto j: neigh_in) {
-      if (conf.dist_square(i, j) < diam2) {
+      if (i != j && conf.dist_square(i, j) < diam2) {
         to_be_moved[i] = true;
         to_be_moved[j] = true;
       }
