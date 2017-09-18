@@ -66,15 +66,14 @@ private:
 
 public:
 	void addNeighborBox(Box* neigh_box);
+	void resetNeighborBoxes();
 	void add(unsigned);
-	void addFromNeighbor(unsigned);
-
 	void remove(unsigned);
-	void removeFromNeighbor(unsigned);
 	void buildNeighborhoodContainer();
 
 	const std::vector <unsigned> & neighborsOffBox() const;
 	std::vector <unsigned> neighborsInBox(unsigned i) const;
+	std::vector <unsigned> neighborsInBoxGreedy(unsigned i) const;
 	const std::set <unsigned> & getContainer() const {return container;}
 };
 
@@ -86,6 +85,11 @@ inline void Box::addNeighborBox(Box* neigh_box)
 		return;
 	}
 	neighbors.push_back(neigh_box);
+}
+
+inline void Box::resetNeighborBoxes() {
+	neighbors.clear();
+	neighborhood_container.clear();
 }
 
 inline void Box::add(unsigned i)
@@ -119,8 +123,12 @@ const std::vector <unsigned> & Box::neighborsOffBox() const {
 	return neighborhood_container;
 }
 
-std::vector <unsigned> Box::neighborsInBox(unsigned i) const {
+std::vector <unsigned> Box::neighborsInBoxGreedy(unsigned i) const {
 	return std::vector <unsigned>(++container.find(i), container.end());
+}
+
+std::vector <unsigned> Box::neighborsInBox(unsigned i) const {
+	return std::vector <unsigned>(container.begin(), container.end());
 }
 
 
@@ -134,13 +142,17 @@ private:
 	std::vector<Box*> boxMap;
 	Periodizer pbc;
 	mfloat total_size;
+	bool _greed;
 	Box* whichBox(const std::array<mfloat,2> &pos);
 	void assignNeighbors();
+	void assignNeighborsDoubleCount();
 public:
 	BoxSet(mfloat box_min_size,
 				std::size_t np,
 				mfloat system_size,
-				Periodizer PBC);
+				Periodizer PBC,
+			  bool greedy=true);
+	void setGreed(bool);
 	void box(unsigned i, std::array<mfloat, 2> position_i);
 	void box(std::vector<std::array<mfloat, 2>> position);
 	void buildNeighborhoodContainers();
@@ -152,10 +164,12 @@ public:
 inline BoxSet::BoxSet(mfloat box_min_size,
                       std::size_t np,
 											mfloat system_size,
-											Periodizer PBC):
+											Periodizer PBC,
+                      bool greedy):
 _is_boxed(false),
 pbc(PBC),
-total_size(system_size)
+total_size(system_size),
+_greed(greedy)
 {
 	std::cout << "Setting up Cell List System ... ";
 	if (box_min_size > system_size) {
@@ -175,8 +189,26 @@ total_size(system_size)
 		box_size = system_size;
 	}
 	boxes.resize(box_nb*box_nb);
-	assignNeighbors();
+	if (_greed) {
+		assignNeighbors();
+	} else {
+		assignNeighborsDoubleCount();
+	}
 	std::cout << " [ok]" << std::endl;
+}
+
+inline void BoxSet::setGreed(bool greed) {
+	if (_greed != greed) {
+		_greed = greed;
+		for (auto &b: boxes) {
+			b.resetNeighborBoxes();
+		}
+		if (_greed) {
+			assignNeighbors();
+		} else {
+			assignNeighborsDoubleCount();
+		}
+	}
 }
 
 inline void BoxSet::assignNeighbors()
@@ -199,6 +231,44 @@ inline void BoxSet::assignNeighbors()
 			auto delta1 = box_size;
 			auto pos_neigh = pos;
 			pos_neigh[1] += delta1;
+			bx.addNeighborBox(whichBox(pbc.periodized(pos_neigh)));
+		}
+	}
+}
+
+inline void BoxSet::assignNeighborsDoubleCount()
+{
+	// becomes interesting if you don't check for all particles' neighborhoods,
+	// but instead wants to know the neighborhood of a small subset
+	for (unsigned i=0; i<box_nb; i++) {
+		for (unsigned j=0; j<box_nb; j++) {
+			std::array<mfloat, 2> pos = {(i+0.5)*box_size, (j+0.5)*box_size};
+			unsigned box_label = i + j*box_nb;
+			auto &bx = boxes[box_label];
+			// rhs 3 neighbors
+			auto delta0 = box_size;
+			for (const auto& b : {-1, 0, 1}) {
+				auto delta1 = b*box_size;
+				auto pos_neigh = pos;
+				pos_neigh[0] += delta0;
+				pos_neigh[1] += delta1;
+				bx.addNeighborBox(whichBox(pbc.periodized(pos_neigh)));
+			}
+			delta0 = -box_size;
+			for (const auto& b : {-1, 0, 1}) {
+				auto delta1 = b*box_size;
+				auto pos_neigh = pos;
+				pos_neigh[0] += delta0;
+				pos_neigh[1] += delta1;
+				bx.addNeighborBox(whichBox(pbc.periodized(pos_neigh)));
+			}
+			// right-on-top neighbor
+			auto pos_neigh = pos;
+			pos_neigh[1] += box_size;
+			bx.addNeighborBox(whichBox(pbc.periodized(pos_neigh)));
+
+			pos_neigh = pos;
+			pos_neigh[1] -= box_size;
 			bx.addNeighborBox(whichBox(pbc.periodized(pos_neigh)));
 		}
 	}
@@ -257,7 +327,11 @@ inline const std::vector<unsigned>& BoxSet::neighborsOffBox(unsigned i) const
 
 inline std::vector<unsigned> BoxSet::neighborsInBox(unsigned i) const
 {
-	return (boxMap[i])->neighborsInBox(i);
+	if (_greed) {
+		return (boxMap[i])->neighborsInBoxGreedy(i);
+	} else {
+		return (boxMap[i])->neighborsInBox(i);
+	}
 }
 
 #endif /* defined(__MFTB__Box__) */

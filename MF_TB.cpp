@@ -110,7 +110,10 @@ std::tuple<unsigned, mfloat, mfloat>  parse_args(int argc, char **argv) {
   return std::make_tuple(np, phi, range);
 }
 
-void findActive(const Configuration &conf, std::vector<bool> &to_be_moved, const BoxSet &bxset, mfloat diam2) {
+void findActive(const Configuration &conf,
+                std::vector<bool> &to_be_moved,
+                const BoxSet &bxset,
+                mfloat diam2) {
   to_be_moved.assign(conf.np(), false);
   for (unsigned i=0; i<conf.np(); i++) {
     auto neigh_out = bxset.neighborsOffBox(i);
@@ -130,6 +133,30 @@ void findActive(const Configuration &conf, std::vector<bool> &to_be_moved, const
   }
 }
 
+void findActiveFromMoved(const Configuration &conf,
+                         std::set<unsigned> &just_moved,
+                         const BoxSet &bxset,
+                         mfloat diam2) {
+  std::set<unsigned> to_be_moved;
+  for (auto i: just_moved) {
+    auto neigh_out = bxset.neighborsOffBox(i);
+    for (auto j: neigh_out) {
+      if (conf.dist_square(i, j) < diam2) {
+        to_be_moved.insert(i);
+        to_be_moved.insert(j);
+      }
+    }
+    auto neigh_in = bxset.neighborsInBox(i);
+    for (auto j: neigh_in) {
+      if (i != j && conf.dist_square(i, j) < diam2) {
+        to_be_moved.insert(i);
+        to_be_moved.insert(j);
+      }
+    }
+  }
+  just_moved = to_be_moved;
+}
+
 unsigned moveParticlesMF(Configuration &conf, const std::vector<bool> &to_be_moved, MTRand &r_gen) {
   unsigned active_nb = 0;
   for (unsigned i=0; i<conf.np(); i++) {
@@ -142,6 +169,13 @@ unsigned moveParticlesMF(Configuration &conf, const std::vector<bool> &to_be_mov
   return active_nb;
 }
 
+unsigned moveParticlesMF(Configuration &conf, const std::set<unsigned> &to_be_moved, MTRand &r_gen) {
+  for (auto i: to_be_moved) {
+      conf.pos[i][0] = conf.size()*r_gen.rand();
+      conf.pos[i][1] = conf.size()*r_gen.rand();
+  }
+  return to_be_moved.size();
+}
 
 unsigned moveParticles(Configuration &conf, const std::vector<bool> &to_be_moved, MTRand &r_gen, mfloat range) {
   unsigned active_nb = 0;
@@ -153,6 +187,22 @@ unsigned moveParticles(Configuration &conf, const std::vector<bool> &to_be_moved
     }
   }
   return active_nb;
+}
+
+unsigned moveParticles(Configuration &conf, const std::set<unsigned> &to_be_moved, MTRand &r_gen, mfloat range) {
+  for (auto i: to_be_moved) {
+    conf.pos[i][0] += r_gen.randNorm(0., range);
+    conf.pos[i][1] += r_gen.randNorm(0., range);
+  }
+  return to_be_moved.size();
+}
+
+std::set<unsigned> nonzero(const std::vector<bool> &v) {
+  std::set<unsigned> nnz;
+  for (unsigned i=0; i<v.size(); i++) {
+    nnz.insert(i);
+  }
+  return nnz;
 }
 
 int main(int argc, char **argv)
@@ -168,7 +218,7 @@ int main(int argc, char **argv)
 
   Periodizer pbc(conf.size());
 
-  BoxSet bxset(2, conf.np(), conf.size(), pbc);
+  BoxSet bxset(2*rad, conf.np(), conf.size(), pbc);
   bxset.box(conf.pos);
   bxset.buildNeighborhoodContainers();
 
@@ -193,20 +243,29 @@ int main(int argc, char **argv)
   std::ofstream out_data (dfile_name.c_str());
   checkFileExists(cfile_name);
   std::ofstream out_conf (cfile_name.c_str());
-
+  bool targeted_search = false;
+  std::set<unsigned> to_be_moved_label;
   do {
-    findActive(conf, to_be_moved, bxset, diam2);
-    if (mean_field) {
-      active_nb = moveParticlesMF(conf, to_be_moved, r_gen);
+    if (!targeted_search) {
+      findActive(conf, to_be_moved, bxset, diam2);
+      if (mean_field) {
+        active_nb = moveParticlesMF(conf, to_be_moved, r_gen);
+      } else {
+        active_nb = moveParticles(conf, to_be_moved, r_gen, range);
+        pbc.periodize(conf.pos);
+      }
     } else {
-      active_nb = moveParticles(conf, to_be_moved, r_gen, range);
-      pbc.periodize(conf.pos);
+      findActiveFromMoved(conf, to_be_moved_label, bxset, diam2);
+      if (mean_field) {
+        active_nb = moveParticlesMF(conf, to_be_moved_label, r_gen);
+      } else {
+        active_nb = moveParticles(conf, to_be_moved_label, r_gen, range);
+        pbc.periodize(conf.pos);
+      }
     }
-
-    bxset.box(conf.pos);
-    bxset.buildNeighborhoodContainers();
     active_prop = active_nb;
     active_prop /= conf.np();
+
     if (tcount%out_data_period == 0) {
       out_data << tcount << " " << active_prop << std::endl;
       std::cout << tcount << " " << active_prop << std::endl;
@@ -216,6 +275,16 @@ int main(int argc, char **argv)
       out_conf << "time: " << tcount << std::endl;
       printConf(out_conf, conf.pos);
     }
+
+    if (!targeted_search && conf.np() > 1e1 && active_prop < 0.1) {
+      bxset.setGreed(false);
+      to_be_moved_label = nonzero(to_be_moved);
+      to_be_moved.clear();
+      targeted_search = true;
+    }
+    bxset.box(conf.pos);
+    bxset.buildNeighborhoodContainers();
+
     tcount++;
   } while(active_nb&&tcount<simu_stop);
 
