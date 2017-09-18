@@ -276,7 +276,7 @@ int main(int argc, char **argv)
       printConf(out_conf, conf.pos);
     }
 
-    if (!targeted_search && conf.np() > 1e1 && active_prop < 0.1) {
+    if (!targeted_search && conf.np() >= 1e5 && active_prop < 0.02) {
       bxset.setGreed(false);
       to_be_moved_label = nonzero(to_be_moved);
       to_be_moved.clear();
