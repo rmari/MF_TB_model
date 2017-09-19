@@ -76,11 +76,47 @@ private:
   mfloat half_size;
 };
 
-std::tuple<unsigned, mfloat, mfloat>  parse_args(int argc, char **argv) {
+Configuration read_conf(std::string fname) {
+  std::ifstream fin (fname);
+  if (!fin.good()) {
+    std::cerr << " could not open " << fname << std::endl;
+  }
+  // auto startN = fname.find("_N")+2;
+  auto startphi = fname.find("_phi");
+  // unsigned N = std::stoi(fname.substr(startN, startphi-startN));
+
+  startphi += 4;
+  auto endphi = fname.find("_range");
+  if (endphi == std::string::npos) {
+    endphi = fname.find(".dat");
+  }
+  mfloat phi = std::stod(fname.substr(startphi, endphi-startphi));
+
+  std::string dumb;
+  unsigned t;
+  fin >> dumb >> t;
+  std::cout << "init conf time : " << t << std::endl;
+  std::array<mfloat, 2> xy;
+  std::vector<std::array<mfloat, 2>> positions;
+  while (true) {
+    fin >> xy[0] >> xy[1];
+    if (fin.eof()) {
+      break;
+    }
+    positions.push_back(xy);
+  }
+  mfloat rad = 1;
+  Configuration conf(positions.size(), phi, rad);
+  conf.pos = positions;
+  return conf;
+}
+
+std::tuple<unsigned, mfloat, mfloat, std::string>  parse_args(int argc, char **argv) {
   const struct option longopts[] = {
     {"np",   required_argument, 0, 'n'},
     {"phi",  required_argument, 0, 'p'},
     {"range",  required_argument, 0, 'r'},
+    {"conf",  required_argument, 0, 'c'},
     {0, 0, 0, 0},
   };
 
@@ -89,7 +125,8 @@ std::tuple<unsigned, mfloat, mfloat>  parse_args(int argc, char **argv) {
   unsigned np = 0;
   mfloat phi = 1;
   mfloat range = -1;
-  while ((c = getopt_long(argc, argv, "n:p:r:", longopts, &index)) != -1) {
+  std::string conf = "";
+  while ((c = getopt_long(argc, argv, "n:p:r:c:", longopts, &index)) != -1) {
     switch (c) {
       case 'n':
         np = atoi(optarg);
@@ -100,6 +137,9 @@ std::tuple<unsigned, mfloat, mfloat>  parse_args(int argc, char **argv) {
       case 'r':
         range = atof(optarg);
         break;
+      case 'c':
+        conf = std::string(optarg);
+        break;
       case '?':
         /* getopt already printed an error message. */
         break;
@@ -107,7 +147,7 @@ std::tuple<unsigned, mfloat, mfloat>  parse_args(int argc, char **argv) {
         abort();
     }
   }
-  return std::make_tuple(np, phi, range);
+  return std::make_tuple(np, phi, range, conf);
 }
 
 void findActive(const Configuration &conf,
@@ -207,15 +247,27 @@ std::set<unsigned> nonzero(const std::vector<bool> &v) {
 
 int main(int argc, char **argv)
 {
+  MTRand r_gen;
 
   auto params = parse_args(argc, argv);
   mfloat range = std::get<2>(params);
   bool mean_field = range < 0;
+
+  auto conffile = std::get<3>(params);
   mfloat rad = 1;
   Configuration conf(std::get<0>(params), std::get<1>(params), rad);
-  MTRand r_gen;
-  conf.pos = randConf(conf.np(), conf.size(), r_gen);
 
+  if (conffile != "") {
+    conf = read_conf(conffile);
+    if (std::get<0>(params) != conf.np()) {
+      std::cerr << " conf size inconsistant with CL args" << std::endl;
+    }
+    if (std::get<1>(params) != conf.phi()) {
+      std::cerr << " conf phi inconsistant with CL args"<< std::endl;
+    }
+  } else {
+    conf.pos = randConf(conf.np(), conf.size(), r_gen);
+  }
   Periodizer pbc(conf.size());
 
   BoxSet bxset(2*rad, conf.np(), conf.size(), pbc);
@@ -228,16 +280,23 @@ int main(int argc, char **argv)
   unsigned tcount = 0;
   unsigned out_data_period = 10;
   unsigned out_conf_period = 1000;
-  unsigned simu_stop = 50000;
+  unsigned simu_stop = 1;
   mfloat diam2 = 4*conf.rad()*conf.rad();
 
   std::string dfile_name, cfile_name;
-  if(mean_field) {
-    dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
-    cfile_name = "conf_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
+  if (!conffile.empty()) {
+    cfile_name = conffile;
+    cfile_name.replace(cfile_name.find("conf_mftb"), cfile_name.find("conf_mftb")+9, "conf2_mftb");
+    dfile_name = cfile_name;
+    dfile_name.replace(cfile_name.find("conf2"), cfile_name.find("conf2")+5, "data2");
   } else {
-    dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+"_range"+std::to_string(range)+".dat";
-    cfile_name = "conf_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+"_range"+std::to_string(range)+".dat";
+    if (mean_field) {
+      dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
+      cfile_name = "conf_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+".dat";
+    } else {
+      dfile_name = "data_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+"_range"+std::to_string(range)+".dat";
+      cfile_name = "conf_mftb_N"+std::to_string(conf.np())+"_phi"+std::to_string(conf.phi())+"_range"+std::to_string(range)+".dat";
+    }
   }
   checkFileExists(dfile_name);
   std::ofstream out_data (dfile_name.c_str());
