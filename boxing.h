@@ -8,6 +8,7 @@
 #ifndef __MFTB__Box__
 #define __MFTB__Box__
 #include <set>
+#include <unordered_set>
 #include <vector>
 #include <array>
 #include <sstream>
@@ -73,7 +74,6 @@ public:
 
 	const std::vector <unsigned> & neighborsOffBox() const;
 	std::vector <unsigned> neighborsInBox(unsigned i) const;
-	std::vector <unsigned> neighborsInBoxGreedy(unsigned i) const;
 	const std::set <unsigned> & getContainer() const {return container;}
 };
 
@@ -123,53 +123,92 @@ const std::vector <unsigned> & Box::neighborsOffBox() const {
 	return neighborhood_container;
 }
 
-std::vector <unsigned> Box::neighborsInBoxGreedy(unsigned i) const {
+std::vector <unsigned> Box::neighborsInBox(unsigned i) const {
 	return std::vector <unsigned>(++container.find(i), container.end());
 }
 
-std::vector <unsigned> Box::neighborsInBox(unsigned i) const {
-	return std::vector <unsigned>(container.begin(), container.end());
+class ExtendedBox{
+private:
+	std::vector <ExtendedBox*> neighbors;
+	std::vector <unsigned> container;
+
+public:
+	void addNeighborBox(ExtendedBox* neigh_box);
+	void addFromNeighbor(unsigned);
+	void add(unsigned);
+	void removeFromNeighbor(unsigned);
+	void remove(unsigned);
+
+	std::vector <unsigned> getContainer() const {return
+	  																						std::vector<unsigned>(container.begin(), container.end());}
+
+};
+
+inline void ExtendedBox::addNeighborBox(ExtendedBox* neigh_box)
+{
+	if (neigh_box == this) {
+		return;
+	}
+	neighbors.push_back(neigh_box);
 }
 
+inline void ExtendedBox::add(unsigned i)
+{
+	container.push_back(i);
+	for (auto &bx: neighbors) {
+		bx->addFromNeighbor(i);
+	}
+}
 
+inline void ExtendedBox::addFromNeighbor(unsigned i)
+{
+	container.push_back(i);
+}
 
+inline void ExtendedBox::remove(unsigned i)
+{
+	removeFromNeighbor(i);
+	for (auto &bx: neighbors) {
+		bx->removeFromNeighbor(i);
+	}
+}
+
+inline void ExtendedBox::removeFromNeighbor(unsigned i)
+{
+	auto elm = std::find(container.begin(), container.end(), i);
+	*elm = *(--container.end());
+	container.pop_back();
+}
+
+template<class BxClass>
 class BoxSet{
-private:
+protected:
 	unsigned box_nb;
 	bool _is_boxed;
 	mfloat box_size;
-	std::vector<Box> boxes;
-	std::vector<Box*> boxMap;
+	std::vector<BxClass> boxes;
+	std::vector<BxClass*> boxMap;
 	Periodizer pbc;
 	mfloat total_size;
-	bool _greed;
-	Box* whichBox(const std::array<mfloat,2> &pos);
-	void assignNeighbors();
-	void assignNeighborsDoubleCount();
+	BxClass* whichBox(const std::array<mfloat,2> &pos);
+	virtual void assignNeighbors()=0;
 public:
 	BoxSet(mfloat box_min_size,
 				std::size_t np,
 				mfloat system_size,
-				Periodizer PBC,
-			  bool greedy=true);
-	void setGreed(bool);
+				Periodizer PBC);
 	void box(unsigned i, std::array<mfloat, 2> position_i);
 	void box(std::vector<std::array<mfloat, 2>> position);
-	void buildNeighborhoodContainers();
-	const std::vector <unsigned>& neighborsOffBox(unsigned i) const;
-	std::vector <unsigned> neighborsInBox(unsigned i) const;
-
 };
 
-inline BoxSet::BoxSet(mfloat box_min_size,
+template<class BxClass>
+inline BoxSet<BxClass>::BoxSet(mfloat box_min_size,
                       std::size_t np,
 											mfloat system_size,
-											Periodizer PBC,
-                      bool greedy):
+											Periodizer PBC):
 _is_boxed(false),
 pbc(PBC),
-total_size(system_size),
-_greed(greedy)
+total_size(system_size)
 {
 	std::cout << "Setting up Cell List System ... ";
 	if (box_min_size > system_size) {
@@ -189,29 +228,66 @@ _greed(greedy)
 		box_size = system_size;
 	}
 	boxes.resize(box_nb*box_nb);
-	if (_greed) {
-		assignNeighbors();
-	} else {
-		assignNeighborsDoubleCount();
-	}
 	std::cout << " [ok]" << std::endl;
 }
 
-inline void BoxSet::setGreed(bool greed) {
-	if (_greed != greed) {
-		_greed = greed;
-		for (auto &b: boxes) {
-			b.resetNeighborBoxes();
+template<class BxClass>
+inline BxClass* BoxSet<BxClass>::whichBox(const std::array<mfloat, 2> &pos)
+{
+	unsigned label = (unsigned)(box_nb*(pos[0]/total_size))+box_nb*(unsigned)(box_nb*(pos[1]/total_size));
+	if (label >= boxes.size()) {
+		std::ostringstream error_str;
+		error_str  << " BoxSet: trying to box position out of boundaries \"" << pos[0] << ", " << pos[1]	<< "\""\
+		           << " (system size "<< box_nb*box_size << ")" << std::endl;
+		throw std::runtime_error(error_str.str());
+	}
+	return &boxes[label];
+}
+
+template<class BxClass>
+inline void BoxSet<BxClass>::box(unsigned i, std::array<mfloat, 2> position_i)
+{
+	BxClass* b = whichBox(position_i);
+	if (b != boxMap[i]) {
+		if (boxMap[i] != NULL) {
+			boxMap[i]->remove(i);
 		}
-		if (_greed) {
-			assignNeighbors();
-		} else {
-			assignNeighborsDoubleCount();
+		b->add(i);
+		boxMap[i] = b;
+	}
+}
+
+template<class BxClass>
+inline void BoxSet<BxClass>::box(std::vector<std::array<mfloat, 2>> position)
+{
+	for (unsigned i=0; i<position.size(); i++) {
+		BxClass* b = whichBox(position[i]);
+		if (b != boxMap[i]) {
+			if (boxMap[i] != NULL) {
+				boxMap[i]->remove(i);
+			}
+			b->add(i);
+			boxMap[i] = b;
 		}
 	}
 }
 
-inline void BoxSet::assignNeighbors()
+class ExclusiveBoxSet : public BoxSet<Box> {
+private:
+	void assignNeighbors();
+public:
+	ExclusiveBoxSet(mfloat box_min_size,
+									std::size_t np,
+									mfloat system_size,
+									Periodizer PBC)
+									: BoxSet(box_min_size, np, system_size, PBC) {assignNeighbors();};
+	void buildNeighborhoodContainers();
+	const std::vector <unsigned>& neighborsOffBox(unsigned i) const;
+	std::vector <unsigned> neighborsInBox(unsigned i) const;
+};
+
+
+inline void ExclusiveBoxSet::assignNeighbors()
 {
 	for (unsigned i=0; i<box_nb; i++) {
 		for (unsigned j=0; j<box_nb; j++) {
@@ -236,7 +312,38 @@ inline void BoxSet::assignNeighbors()
 	}
 }
 
-inline void BoxSet::assignNeighborsDoubleCount()
+inline void ExclusiveBoxSet::buildNeighborhoodContainers()
+{
+	for (auto& bx : boxes) {
+		bx.buildNeighborhoodContainer();
+	}
+}
+
+inline const std::vector<unsigned>& ExclusiveBoxSet::neighborsOffBox(unsigned i) const
+{
+	return (boxMap[i])->neighborsOffBox();
+}
+
+inline std::vector<unsigned> ExclusiveBoxSet::neighborsInBox(unsigned i) const
+{
+	return (boxMap[i])->neighborsInBox(i);
+}
+
+
+class InclusiveBoxSet: public BoxSet<ExtendedBox> {
+private:
+	void assignNeighbors();
+public:
+	InclusiveBoxSet(mfloat box_min_size,
+									std::size_t np,
+									mfloat system_size,
+									Periodizer PBC)
+									: BoxSet(box_min_size, np, system_size, PBC) {assignNeighbors();};
+	std::vector<unsigned> neighbors(unsigned i) const;
+
+};
+
+inline void InclusiveBoxSet::assignNeighbors()
 {
 	// becomes interesting if you don't check for all particles' neighborhoods,
 	// but instead wants to know the neighborhood of a small subset
@@ -274,64 +381,8 @@ inline void BoxSet::assignNeighborsDoubleCount()
 	}
 }
 
-inline Box* BoxSet::whichBox(const std::array<mfloat, 2> &pos)
+inline std::vector<unsigned> InclusiveBoxSet::neighbors(unsigned i) const
 {
-	unsigned label = (unsigned)(box_nb*(pos[0]/total_size))+box_nb*(unsigned)(box_nb*(pos[1]/total_size));
-	if (label >= boxes.size()) {
-		std::ostringstream error_str;
-		error_str  << " BoxSet: trying to box position out of boundaries \"" << pos[0] << ", " << pos[1]	<< "\""\
-		           << " (system size "<< box_nb*box_size << ")" << std::endl;
-		throw std::runtime_error(error_str.str());
-	}
-	return &boxes[label];
+	return (boxMap[i])->getContainer();
 }
-
-inline void BoxSet::box(unsigned i, std::array<mfloat, 2> position_i)
-{
-	Box* b = whichBox(position_i);
-	if (b != boxMap[i]) {
-		if (boxMap[i] != NULL) {
-			boxMap[i]->remove(i);
-		}
-		b->add(i);
-		boxMap[i] = b;
-	}
-}
-
-inline void BoxSet::box(std::vector<std::array<mfloat, 2>> position)
-{
-	for (unsigned i=0; i<position.size(); i++) {
-		Box* b = whichBox(position[i]);
-		if (b != boxMap[i]) {
-			if (boxMap[i] != NULL) {
-				boxMap[i]->remove(i);
-			}
-			b->add(i);
-			boxMap[i] = b;
-		}
-	}
-}
-
-//public methods
-inline void BoxSet::buildNeighborhoodContainers()
-{
-	for (auto& bx : boxes) {
-		bx.buildNeighborhoodContainer();
-	}
-}
-
-inline const std::vector<unsigned>& BoxSet::neighborsOffBox(unsigned i) const
-{
-	return (boxMap[i])->neighborsOffBox();
-}
-
-inline std::vector<unsigned> BoxSet::neighborsInBox(unsigned i) const
-{
-	if (_greed) {
-		return (boxMap[i])->neighborsInBoxGreedy(i);
-	} else {
-		return (boxMap[i])->neighborsInBox(i);
-	}
-}
-
 #endif /* defined(__MFTB__Box__) */

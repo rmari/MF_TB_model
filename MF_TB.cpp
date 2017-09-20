@@ -57,15 +57,30 @@ public:
   mfloat size() const {return _size;};
   mfloat phi() const {return _phi;};
   mfloat dist_square(unsigned i, unsigned j) const {
-    mfloat d2 = 0;
-    for (auto d: {pos[j][0] - pos[i][0], pos[j][1] - pos[i][1]}) {
-      while (d > half_size)
-        d -= _size;
-      while (d < -half_size)
-        d += _size;
-      d2 += d*d;
-    }
-    return d2;
+    auto d0 = pos[j][0] - pos[i][0];
+    while (d0 > half_size)
+      d0 -= _size;
+    while (d0 < -half_size)
+      d0 += _size;
+    auto d1 = pos[j][1] - pos[i][1];
+    while (d1 > half_size)
+      d1 -= _size;
+    while (d1 < -half_size)
+      d1 += _size;
+    return d0*d0+d1*d1;
+  }
+  mfloat dist_square(std::array<mfloat, 2> pos_i, unsigned j) const {
+    auto d0 = pos[j][0] - pos_i[0];
+    if (d0 > half_size)
+      d0 -= _size;
+    if (d0 < -half_size)
+      d0 += _size;
+    auto d1 = pos[j][1] - pos_i[1];
+    if (d1 > half_size)
+      d1 -= _size;
+    if (d1 < -half_size)
+      d1 += _size;
+    return d0*d0+d1*d1;
   }
   unsigned np() const {return pos.size();};
   mfloat rad() const {return _rad;};
@@ -152,20 +167,21 @@ std::tuple<unsigned, mfloat, mfloat, std::string>  parse_args(int argc, char **a
 
 void findActive(const Configuration &conf,
                 std::vector<bool> &to_be_moved,
-                const BoxSet &bxset,
+                const ExclusiveBoxSet &bxset,
                 mfloat diam2) {
   to_be_moved.assign(conf.np(), false);
   for (unsigned i=0; i<conf.np(); i++) {
     auto neigh_out = bxset.neighborsOffBox(i);
+    auto pos_i = conf.pos[i];
     for (auto j: neigh_out) {
-      if (conf.dist_square(i, j) < diam2) {
+      if (conf.dist_square(pos_i, j) < diam2) {
         to_be_moved[i] = true;
         to_be_moved[j] = true;
       }
     }
     auto neigh_in = bxset.neighborsInBox(i);
     for (auto j: neigh_in) {
-      if (i != j && conf.dist_square(i, j) < diam2) {
+      if (i != j && conf.dist_square(pos_i, j) < diam2) {
         to_be_moved[i] = true;
         to_be_moved[j] = true;
       }
@@ -175,20 +191,14 @@ void findActive(const Configuration &conf,
 
 void findActiveFromMoved(const Configuration &conf,
                          std::set<unsigned> &just_moved,
-                         const BoxSet &bxset,
+                         const InclusiveBoxSet &bxset,
                          mfloat diam2) {
   std::set<unsigned> to_be_moved;
   for (auto i: just_moved) {
-    auto neigh_out = bxset.neighborsOffBox(i);
+    auto neigh_out = bxset.neighbors(i);
+    auto pos_i = conf.pos[i];
     for (auto j: neigh_out) {
-      if (conf.dist_square(i, j) < diam2) {
-        to_be_moved.insert(i);
-        to_be_moved.insert(j);
-      }
-    }
-    auto neigh_in = bxset.neighborsInBox(i);
-    for (auto j: neigh_in) {
-      if (i != j && conf.dist_square(i, j) < diam2) {
+      if (i != j && conf.dist_square(pos_i, j) < diam2) {
         to_be_moved.insert(i);
         to_be_moved.insert(j);
       }
@@ -270,7 +280,9 @@ int main(int argc, char **argv)
   }
   Periodizer pbc(conf.size());
 
-  BoxSet bxset(2*rad, conf.np(), conf.size(), pbc);
+  ExclusiveBoxSet bxset(10*rad, conf.np(), conf.size(), pbc);
+  InclusiveBoxSet bxset_in(4*rad, conf.np(), conf.size(), pbc);
+
   bxset.box(conf.pos);
   bxset.buildNeighborhoodContainers();
 
@@ -280,7 +292,7 @@ int main(int argc, char **argv)
   unsigned tcount = 0;
   unsigned out_data_period = 10;
   unsigned out_conf_period = 1000;
-  unsigned simu_stop = 1;
+  unsigned simu_stop = 1000000;
   mfloat diam2 = 4*conf.rad()*conf.rad();
 
   std::string dfile_name, cfile_name;
@@ -314,7 +326,7 @@ int main(int argc, char **argv)
         pbc.periodize(conf.pos);
       }
     } else {
-      findActiveFromMoved(conf, to_be_moved_label, bxset, diam2);
+      findActiveFromMoved(conf, to_be_moved_label, bxset_in, diam2);
       if (mean_field) {
         active_nb = moveParticlesMF(conf, to_be_moved_label, r_gen);
       } else {
@@ -335,15 +347,17 @@ int main(int argc, char **argv)
       printConf(out_conf, conf.pos);
     }
 
-    if (!targeted_search && conf.np() >= 1e5 && active_prop < 0.01) {
-      bxset.setGreed(false);
+    if (!targeted_search && conf.np() >= 1e5 && active_prop < 0.02) {
       to_be_moved_label = nonzero(to_be_moved);
       to_be_moved.clear();
       targeted_search = true;
     }
-    bxset.box(conf.pos);
-    bxset.buildNeighborhoodContainers();
-
+    if (targeted_search) {
+      bxset_in.box(conf.pos);
+    } else {
+      bxset.box(conf.pos);
+      bxset.buildNeighborhoodContainers();
+    }
     tcount++;
   } while(active_nb&&tcount<simu_stop);
 
@@ -356,15 +370,5 @@ int main(int argc, char **argv)
   out_conf.close();
   out_data.close();
 
-  // for (unsigned i=0; i<conf.np(); i++) {
-  //   auto neigh_out = bxset.neighborsOffBox(i);
-  //   for (auto j: neigh_out) {
-  //     std::cout << conf.dist_square(i, j) << std::endl;
-  //   }
-  //   auto neigh_in = bxset.neighborsInBox(i);
-  //   for (auto j: neigh_in) {
-  //     std::cout << conf.dist_square(i, j) << std::endl;
-  //   }
-  // }
-
+  return 0;
 }
