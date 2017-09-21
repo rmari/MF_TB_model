@@ -16,6 +16,8 @@ typedef double mfloat;
 
 
 void printConf(std::ostream &out, std::vector<std::array<mfloat, 2>> conf) {
+  out.precision(10);
+  out << std::scientific;
   for (auto &pos: conf) {
     out << pos[0] << " " << pos[1] << std::endl;
   }
@@ -313,7 +315,6 @@ int main(int argc, char **argv)
   checkFileExists(dfile_name);
   std::ofstream out_data (dfile_name.c_str());
   checkFileExists(cfile_name);
-  std::ofstream out_conf (cfile_name.c_str());
   bool targeted_search = false;
   std::set<unsigned> to_be_moved_label;
   do {
@@ -342,9 +343,10 @@ int main(int argc, char **argv)
       std::cout << tcount << " " << active_prop << std::endl;
     }
     if (tcount%out_conf_period == 0) {
-      out_conf.seekp(0, out_conf.beg);
+      std::ofstream out_conf (cfile_name.c_str());
       out_conf << "time: " << tcount << std::endl;
       printConf(out_conf, conf.pos);
+      out_conf.close();
     }
 
     if (!targeted_search && conf.np() >= 1e5 && active_prop < 0.02) {
@@ -362,13 +364,14 @@ int main(int argc, char **argv)
   } while(active_nb&&tcount<simu_stop);
 
   out_data << tcount << " " << active_prop << std::endl;
+  out_data.close();
   std::cout << tcount << " " << active_prop << std::endl;
-  out_conf.seekp(0, out_conf.beg);
+
+  std::ofstream out_conf (cfile_name.c_str());
   out_conf << "time: " << tcount << std::endl;
   printConf(out_conf, conf.pos);
-
   out_conf.close();
-  out_data.close();
+
 
   return 0;
 }
