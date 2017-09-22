@@ -3,16 +3,9 @@
 *.ipynb
 
 data/
-
 MF_TB
-
 *pdf
-
 test/
-
-
- *.o
-
- density_fluctuations
-
- TBM
+*.o
+density_fluctuations
+TBM
