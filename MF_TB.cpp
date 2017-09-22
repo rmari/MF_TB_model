@@ -16,6 +16,8 @@ typedef double mfloat;
 
 
 void printConf(std::ostream &out, std::vector<std::array<mfloat, 2>> conf) {
+  out.precision(10);
+  out << std::scientific;
   for (auto &pos: conf) {
     out << pos[0] << " " << pos[1] << std::endl;
   }
@@ -280,8 +282,22 @@ int main(int argc, char **argv)
   }
   Periodizer pbc(conf.size());
 
-  ExclusiveBoxSet bxset(10*rad, conf.np(), conf.size(), pbc);
-  InclusiveBoxSet bxset_in(4*rad, conf.np(), conf.size(), pbc);
+  double exclusive_bx_size;
+  if (conf.np() > 10000000) {
+    exclusive_bx_size = 0.01*sqrt(conf.np())*rad;
+  } else {
+    exclusive_bx_size = 10*rad;
+  }
+  ExclusiveBoxSet bxset(exclusive_bx_size, conf.np(), conf.size(), pbc);
+  double inclusive_bx_size;
+  if (conf.np() > 20000000) {
+    inclusive_bx_size = 0.002*sqrt(conf.np())*rad;
+  } else if (conf.np() > 5000000) {
+    inclusive_bx_size = 6*rad;
+  } else {
+    inclusive_bx_size = 4*rad;
+  }
+  InclusiveBoxSet bxset_in(inclusive_bx_size, conf.np(), conf.size(), pbc);
 
   bxset.box(conf.pos);
   bxset.buildNeighborhoodContainers();
@@ -313,7 +329,6 @@ int main(int argc, char **argv)
   checkFileExists(dfile_name);
   std::ofstream out_data (dfile_name.c_str());
   checkFileExists(cfile_name);
-  std::ofstream out_conf (cfile_name.c_str());
   bool targeted_search = false;
   std::set<unsigned> to_be_moved_label;
   do {
@@ -342,9 +357,10 @@ int main(int argc, char **argv)
       std::cout << tcount << " " << active_prop << std::endl;
     }
     if (tcount%out_conf_period == 0) {
-      out_conf.seekp(0, out_conf.beg);
+      std::ofstream out_conf (cfile_name.c_str());
       out_conf << "time: " << tcount << std::endl;
       printConf(out_conf, conf.pos);
+      out_conf.close();
     }
 
     if (!targeted_search && conf.np() >= 1e5 && active_prop < 0.02) {
@@ -362,13 +378,14 @@ int main(int argc, char **argv)
   } while(active_nb&&tcount<simu_stop);
 
   out_data << tcount << " " << active_prop << std::endl;
+  out_data.close();
   std::cout << tcount << " " << active_prop << std::endl;
-  out_conf.seekp(0, out_conf.beg);
+
+  std::ofstream out_conf (cfile_name.c_str());
   out_conf << "time: " << tcount << std::endl;
   printConf(out_conf, conf.pos);
-
   out_conf.close();
-  out_data.close();
+
 
   return 0;
 }

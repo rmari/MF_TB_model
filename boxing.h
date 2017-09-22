@@ -220,13 +220,13 @@ total_size(system_size)
 	}
 	box_nb = (unsigned)(system_size/box_min_size);
 	box_size = system_size/box_nb;
-
 	if (box_nb > 3) {
 		_is_boxed = true;
 	} else {
 		box_nb = 1;
 		box_size = system_size;
 	}
+	std::cout << " with box size " << box_size << " ... " ;
 	boxes.resize(box_nb*box_nb);
 	std::cout << " [ok]" << std::endl;
 }
