@@ -10,3 +10,9 @@ MF_TB
 
 test/
 
+
+ *.o
+
+ density_fluctuations
+
+ TBM

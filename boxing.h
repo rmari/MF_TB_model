@@ -13,52 +13,11 @@
 #include <array>
 #include <sstream>
 #include <algorithm>
-
 #include <stdexcept>
+#include "global.h"
+#include "PeriodicBoundary.h"
 
-class Periodizer{
-public:
-	Periodizer(mfloat system_size): size(system_size) {};
-	void periodize(std::array<mfloat,2> &pos);
-	std::array<mfloat,2> periodized(const std::array<mfloat,2> &pos);
-	void periodize(std::vector<std::array<mfloat,2>> &pos);
-	std::vector<std::array<mfloat,2>> periodized(const std::vector<std::array<mfloat,2>> &pos);
-private:
-	mfloat size;
-};
-
-inline void Periodizer::periodize(std::array<mfloat,2> &pos) {
-	for (unsigned i=0; i<2; i++) {
-		while (pos[i] > size)
-			pos[i] -= size;
-		while (pos[i] < 0)
-			pos[i] += size;
-	}
-}
-
-inline std::array<mfloat,2> Periodizer::periodized(const std::array<mfloat,2> &pos) {
-	auto p = pos;
-	periodize(p);
-	return p;
-}
-
-inline void Periodizer::periodize(std::vector<std::array<mfloat,2>> &pos) {
-	for (auto &p: pos) {
-		for (unsigned i=0; i<2; i++) {
-			while (p[i] > size)
-				p[i] -= size;
-			while (p[i] < 0)
-				p[i] += size;
-		}
-	}
-}
-
-inline std::vector<std::array<mfloat,2>> Periodizer::periodized(const std::vector<std::array<mfloat,2>> &pos) {
-	auto p = pos;
-	periodize(p);
-	return p;
-}
-
+namespace TBBoxing {
 class Box{
 private:
 	std::vector <Box*> neighbors;
@@ -119,11 +78,11 @@ inline void Box::buildNeighborhoodContainer()
 	}
 }
 
-const std::vector <unsigned> & Box::neighborsOffBox() const {
+inline const std::vector <unsigned> & Box::neighborsOffBox() const {
 	return neighborhood_container;
 }
 
-std::vector <unsigned> Box::neighborsInBox(unsigned i) const {
+inline std::vector <unsigned> Box::neighborsInBox(unsigned i) const {
 	return std::vector <unsigned>(++container.find(i), container.end());
 }
 
@@ -188,7 +147,7 @@ protected:
 	mfloat box_size;
 	std::vector<BxClass> boxes;
 	std::vector<BxClass*> boxMap;
-	Periodizer pbc;
+	TBPBC::Periodizer pbc;
 	mfloat total_size;
 	BxClass* whichBox(const std::array<mfloat,2> &pos);
 	virtual void assignNeighbors()=0;
@@ -196,7 +155,7 @@ public:
 	BoxSet(mfloat box_min_size,
 				std::size_t np,
 				mfloat system_size,
-				Periodizer PBC);
+				TBPBC::Periodizer PBC);
 	void box(unsigned i, std::array<mfloat, 2> position_i);
 	void box(std::vector<std::array<mfloat, 2>> position);
 };
@@ -205,7 +164,7 @@ template<class BxClass>
 inline BoxSet<BxClass>::BoxSet(mfloat box_min_size,
                       std::size_t np,
 											mfloat system_size,
-											Periodizer PBC):
+											TBPBC::Periodizer PBC):
 _is_boxed(false),
 pbc(PBC),
 total_size(system_size)
@@ -279,7 +238,7 @@ public:
 	ExclusiveBoxSet(mfloat box_min_size,
 									std::size_t np,
 									mfloat system_size,
-									Periodizer PBC)
+									TBPBC::Periodizer PBC)
 									: BoxSet(box_min_size, np, system_size, PBC) {assignNeighbors();};
 	void buildNeighborhoodContainers();
 	const std::vector <unsigned>& neighborsOffBox(unsigned i) const;
@@ -337,10 +296,10 @@ public:
 	InclusiveBoxSet(mfloat box_min_size,
 									std::size_t np,
 									mfloat system_size,
-									Periodizer PBC)
+									TBPBC::Periodizer PBC)
 									: BoxSet(box_min_size, np, system_size, PBC) {assignNeighbors();};
 	std::vector<unsigned> neighbors(unsigned i) const;
-
+	std::vector<unsigned> neighbors(std::array<mfloat, 2> position);
 };
 
 inline void InclusiveBoxSet::assignNeighbors()
@@ -385,4 +344,11 @@ inline std::vector<unsigned> InclusiveBoxSet::neighbors(unsigned i) const
 {
 	return (boxMap[i])->getContainer();
 }
+
+inline std::vector<unsigned> InclusiveBoxSet::neighbors(std::array<mfloat, 2> position)
+{
+	return whichBox(position)->getContainer();
+}
+
+}// TBBoxing namespace
 #endif /* defined(__MFTB__Box__) */
