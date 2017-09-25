@@ -4,7 +4,7 @@ CXX = g++
 # Compilation Flags
 CXXWarnings = -Wall
 CXXFLAGS_common = $(CXXWarnings) $(CXXFLAGS_EXTRA) -std=c++11
-CXXFLAGS_optimized = -O3 $(CXXFLAGS_common)
+CXXFLAGS_optimized = -O3 -march=native $(CXXFLAGS_common)
 CXXFLAGS_debug = -g $(CXXFLAGS_common)
 
 CXXFLAGS_debug += -pg
