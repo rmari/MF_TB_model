@@ -45,6 +45,24 @@ void findActive(const TBConfig::Configuration &conf,
   }
 }
 
+void findPassiveDisp(const TBConfig::Configuration &conf,
+		                const std::vector<bool> &to_be_moved,
+		                std::vector<mfloat> &passive_disp,
+		                MTRand &r_gen) {
+	passive_disp.assign(passive_disp.size(), 0);
+	for (unsigned i=0; i<conf.np(); i++) {
+	  	if (to_be_moved[i]) {
+		    auto pos_i = conf.pos[i];
+			for (unsigned j=0; j<conf.np(); j++) {
+				if (!to_be_moved[j]) {
+			  		auto d2 = conf.dist_square(pos_i, j);
+			  		passive_disp[j] += 2*(r_gen.rand()-0.5)/d2;
+			  	}
+			}
+		}
+	}
+}
+
 void findActiveFromMoved(const TBConfig::Configuration &conf,
                          std::set<unsigned> &just_moved,
                          const TBBoxing::InclusiveBoxSet &bxset,
@@ -63,44 +81,22 @@ void findActiveFromMoved(const TBConfig::Configuration &conf,
   just_moved = to_be_moved;
 }
 
-unsigned moveParticlesMF(TBConfig::Configuration &conf, const std::vector<bool> &to_be_moved, MTRand &r_gen) {
-  unsigned active_nb = 0;
-  for (unsigned i=0; i<conf.np(); i++) {
-    if (to_be_moved[i]) {
-      conf.pos[i][0] = conf.size()*r_gen.rand();
-      conf.pos[i][1] = conf.size()*r_gen.rand();
-      active_nb++;
-    }
-  }
-  return active_nb;
-}
 
-unsigned moveParticlesMF(TBConfig::Configuration &conf, const std::set<unsigned> &to_be_moved, MTRand &r_gen) {
-  for (auto i: to_be_moved) {
-      conf.pos[i][0] = conf.size()*r_gen.rand();
-      conf.pos[i][1] = conf.size()*r_gen.rand();
-  }
-  return to_be_moved.size();
-}
-
-unsigned moveParticles(TBConfig::Configuration &conf, const std::vector<bool> &to_be_moved, MTRand &r_gen, mfloat range) {
+unsigned moveParticles(TBConfig::Configuration &conf, const std::vector<bool> &to_be_moved, 
+						const std::vector<mfloat> &passive_disp, 
+						MTRand &r_gen, mfloat range) {
   unsigned active_nb = 0;
   for (unsigned i=0; i<conf.np(); i++) {
     if (to_be_moved[i]) {
       conf.pos[i][0] += r_gen.randNorm(0., range);
       conf.pos[i][1] += r_gen.randNorm(0., range);
       active_nb++;
+    } else {
+	    conf.pos[i][0] += passive_disp[i]*r_gen.randNorm(0., range);
+    	conf.pos[i][1] += passive_disp[i]*r_gen.randNorm(0., range);
     }
   }
   return active_nb;
-}
-
-unsigned moveParticles(TBConfig::Configuration &conf, const std::set<unsigned> &to_be_moved, MTRand &r_gen, mfloat range) {
-  for (auto i: to_be_moved) {
-    conf.pos[i][0] += r_gen.randNorm(0., range);
-    conf.pos[i][1] += r_gen.randNorm(0., range);
-  }
-  return to_be_moved.size();
 }
 
 TBBoxing::ExclusiveBoxSet setupExclusiveBoxing (const TBConfig::Configuration &conf,
@@ -115,19 +111,6 @@ TBBoxing::ExclusiveBoxSet setupExclusiveBoxing (const TBConfig::Configuration &c
   return TBBoxing::ExclusiveBoxSet(exclusive_bx_size, conf.np(), conf.size(), pbc);
 }
 
-TBBoxing::InclusiveBoxSet setupInclusiveBoxing (const TBConfig::Configuration &conf,
-                                                const TBPBC::Periodizer &pbc) {
-
-  double inclusive_bx_size;
-  if (conf.np() > 20000000) {
-    inclusive_bx_size = 0.002*sqrt(conf.np())*conf.rad();
-  } else if (conf.np() > 5000000) {
-    inclusive_bx_size = 6*conf.rad();
-  } else {
-    inclusive_bx_size = 4*conf.rad();
-  }
-  return TBBoxing::InclusiveBoxSet(inclusive_bx_size, conf.np(), conf.size(), pbc);
-}
 
 void runTB(TBConfig::Configuration &conf,
            MTRand &r_gen,
@@ -135,16 +118,15 @@ void runTB(TBConfig::Configuration &conf,
            std::string cfile_name,
            mfloat range)
 {
-  bool mean_field = range < 0;
   TBPBC::Periodizer pbc(conf.size());
 
   auto bxset = setupExclusiveBoxing(conf, pbc);
-  auto bxset_in = setupInclusiveBoxing(conf, pbc);
 
   bxset.box(conf.pos);
   bxset.buildNeighborhoodContainers();
 
   std::vector<bool> to_be_moved(conf.np(), false);
+  std::vector<mfloat> passive_disp(conf.np(), 0);
   unsigned active_nb;
   double active_prop;
   unsigned tcount = 0;
@@ -157,26 +139,12 @@ void runTB(TBConfig::Configuration &conf,
   checkFileExists(dfile_name);
   std::ofstream out_data (dfile_name.c_str());
   checkFileExists(cfile_name);
-  bool targeted_search = false;
-  std::set<unsigned> to_be_moved_label;
+  std::ofstream out_conf (cfile_name.c_str());
   do {
-    if (!targeted_search) {
-      findActive(conf, to_be_moved, bxset, diam2);
-      if (mean_field) {
-        active_nb = moveParticlesMF(conf, to_be_moved, r_gen);
-      } else {
-        active_nb = moveParticles(conf, to_be_moved, r_gen, range);
-        pbc.periodize(conf.pos);
-      }
-    } else {
-      findActiveFromMoved(conf, to_be_moved_label, bxset_in, diam2);
-      if (mean_field) {
-        active_nb = moveParticlesMF(conf, to_be_moved_label, r_gen);
-      } else {
-        active_nb = moveParticles(conf, to_be_moved_label, r_gen, range);
-        pbc.periodize(conf.pos);
-      }
-    }
+	findActive(conf, to_be_moved, bxset, diam2);
+	findPassiveDisp(conf, to_be_moved, passive_disp, r_gen);
+	active_nb = moveParticles(conf, to_be_moved, passive_disp, r_gen, range);
+	pbc.periodize(conf.pos);
     active_prop = active_nb;
     active_prop /= conf.np();
 
@@ -191,27 +159,17 @@ void runTB(TBConfig::Configuration &conf,
       out_conf.close();
     }
 
-    if (!targeted_search && conf.np() >= 1e5 && active_prop < 0.02) {
-      to_be_moved_label = nonzero(to_be_moved);
-      to_be_moved.clear();
-      targeted_search = true;
-    }
-    if (targeted_search) {
-      bxset_in.box(conf.pos);
-    } else {
-      bxset.box(conf.pos);
-      bxset.buildNeighborhoodContainers();
-    }
+	bxset.box(conf.pos);
+	bxset.buildNeighborhoodContainers();
     tcount++;
+	// TBConfig::printYapConf(out_conf, conf.pos);
   } while(active_nb&&tcount<simu_stop);
 
   out_data << tcount << " " << active_prop << std::endl;
   out_data.close();
   std::cout << tcount << " " << active_prop << std::endl;
 
-  std::ofstream out_conf (cfile_name.c_str());
-  out_conf << "time: " << tcount << std::endl;
-  TBConfig::printConf(out_conf, conf.pos);
+  TBConfig::printYapConf(out_conf, conf.pos);
   out_conf.close();
 }
 

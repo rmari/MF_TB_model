@@ -22,6 +22,17 @@ inline void printConf(std::ostream &out, std::vector<std::array<mfloat, 2>> conf
   }
 }
 
+inline void printYapConf(std::ostream &out, std::vector<std::array<mfloat, 2>> conf) {
+  out.precision(10);
+  out << std::scientific;
+  out << "r  1" << std::endl;
+  out << "@  3" << std::endl;
+  for (auto &pos: conf) {
+    out << "c " << pos[0] << " 0 " << pos[1] << std::endl;
+  }
+  out << std::endl;
+}
+
 inline std::vector<std::array<mfloat, 2>> randConf(unsigned np, mfloat system_size, MTRand &r_gen) {
   std::vector<std::array<mfloat, 2>> conf(np);
   for (auto &pos: conf) {

@@ -14,7 +14,7 @@ endif
 
 INCLUDE_PATH =
 
-OUT_CODE=TBM
+OUT_CODE=TBMLR
 SRC = dynamics.cpp main.cpp
 LIB = boxing.h configuration.h MersenneTwister.h
 OBJ=$(SRC:.cpp=.o)
