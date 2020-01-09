@@ -9,3 +9,6 @@ test/
 *.o
 density_fluctuations
 TBM
+TBLRM
+sandbox
+TBMLR
