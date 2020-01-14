@@ -47,16 +47,21 @@ void findActive(const TBConfig::Configuration &conf,
 
 void findPassiveDisp(const TBConfig::Configuration &conf,
 		                const std::vector<bool> &to_be_moved,
-		                std::vector<mfloat> &passive_disp,
+		                std::vector<std::array<mfloat,2>> &passive_disp,
 		                MTRand &r_gen) {
-	passive_disp.assign(passive_disp.size(), 0);
+	// std::array<mfloat,2> z = {0, 0};
+	passive_disp.assign(passive_disp.size(), {0, 0});
 	for (unsigned i=0; i<conf.np(); i++) {
 	  	if (to_be_moved[i]) {
 		    auto pos_i = conf.pos[i];
 			for (unsigned j=0; j<conf.np(); j++) {
 				if (!to_be_moved[j]) {
 			  		auto d2 = conf.dist_square(pos_i, j);
-			  		passive_disp[j] += 2*(r_gen.rand()-0.5)/d2;
+			  		// auto d = std::sqrt(d2);
+			  		passive_disp[j][0] += r_gen.randNorm(0., 1.)/d2;
+			  		passive_disp[j][1] += r_gen.randNorm(0., 1.)/d2;
+
+			  		// passive_disp[j] += 2*(r_gen.rand()-0.5);
 			  	}
 			}
 		}
@@ -83,19 +88,30 @@ void findActiveFromMoved(const TBConfig::Configuration &conf,
 
 
 unsigned moveParticles(TBConfig::Configuration &conf, const std::vector<bool> &to_be_moved, 
-						const std::vector<mfloat> &passive_disp, 
+						const std::vector<std::array<mfloat, 2>> &passive_disp, 
 						MTRand &r_gen, mfloat range) {
   unsigned active_nb = 0;
+  mfloat avg_pdisp = 0.;
   for (unsigned i=0; i<conf.np(); i++) {
     if (to_be_moved[i]) {
       conf.pos[i][0] += r_gen.randNorm(0., range);
       conf.pos[i][1] += r_gen.randNorm(0., range);
       active_nb++;
     } else {
-	    conf.pos[i][0] += passive_disp[i]*r_gen.randNorm(0., range);
-    	conf.pos[i][1] += passive_disp[i]*r_gen.randNorm(0., range);
+	    conf.pos[i][0] += passive_disp[i][0];
+    	conf.pos[i][1] += passive_disp[i][1];
+    	avg_pdisp += std::sqrt(passive_disp[i][0]*passive_disp[i][0]+passive_disp[i][1]*passive_disp[i][1]);
     }
   }
+  mfloat active_ratio = mfloat(active_nb)/conf.np();
+  // for (unsigned i=0; i<conf.np(); i++) {
+  //   if (!to_be_moved[i]) {
+	 //    conf.pos[i][0] += active_ratio*r_gen.randNorm(0., range);
+  //   	conf.pos[i][1] += active_ratio*r_gen.randNorm(0., range);
+  //   }
+  // }
+  avg_pdisp /= (conf.np()-active_nb);
+  // std::cout << std::sqrt(active_ratio) << " " << avg_pdisp <<  " " <<  avg_pdisp/std::sqrt(active_ratio) << std::endl;
   return active_nb;
 }
 
@@ -126,7 +142,7 @@ void runTB(TBConfig::Configuration &conf,
   bxset.buildNeighborhoodContainers();
 
   std::vector<bool> to_be_moved(conf.np(), false);
-  std::vector<mfloat> passive_disp(conf.np(), 0);
+  std::vector<std::array<mfloat,2>> passive_disp(conf.np(), {0,0});
   unsigned active_nb;
   double active_prop;
   unsigned tcount = 0;
